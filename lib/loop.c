@@ -66,6 +66,7 @@ int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 		pthread_mutex_lock(&mosq->current_out_packet_mutex);
 		pthread_mutex_lock(&mosq->out_packet_mutex);
 		if(mosq->out_packet || mosq->current_out_packet){
+			//检查socket是否可发送
 			FD_SET(mosq->sock, &writefds);
 		}
 #ifdef WITH_TLS
@@ -100,6 +101,8 @@ int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 		return MOSQ_ERR_NO_CONN;
 #endif
 	}
+
+	//内部通信socket, publish函数调用，会导致sockpairR可读
 	if(mosq->sockpairR != INVALID_SOCKET){
 		/* sockpairR is used to break out of select() before the timeout, on a
 		 * call to publish() etc. */
@@ -136,7 +139,8 @@ int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 #else
 	fdcount = select(maxfd+1, &readfds, &writefds, NULL, &local_timeout);
 #endif
-	if(fdcount == -1){
+	if(fdcount == -1)
+	{
 #ifdef WIN32
 		errno = WSAGetLastError();
 #endif
@@ -147,12 +151,16 @@ int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 		}
 	}else{
 		if(mosq->sock != INVALID_SOCKET){
-			if(FD_ISSET(mosq->sock, &readfds)){
+			if(FD_ISSET(mosq->sock, &readfds))
+			{
+				//mqtt网络socekt可读， 读取报文并处理报文
 				rc = mosquitto_loop_read(mosq, max_packets);
 				if(rc || mosq->sock == INVALID_SOCKET){
 					return rc;
 				}
 			}
+
+			//publish（）被调用，有message要发送
 			if(mosq->sockpairR != INVALID_SOCKET && FD_ISSET(mosq->sockpairR, &readfds)){
 #ifndef WIN32
 				if(read(mosq->sockpairR, &pairbuf, 1) == 0){
@@ -164,8 +172,9 @@ int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 				 * we didn't ask for it, because at that point the publish or
 				 * other command wasn't present. */
 				if(mosq->sock != INVALID_SOCKET)
-					FD_SET(mosq->sock, &writefds);
+					FD_SET(mosq->sock, &writefds); 	//设置网络socket可写
 			}
+
 			if(mosq->sock != INVALID_SOCKET && FD_ISSET(mosq->sock, &writefds)){
 #ifdef WITH_TLS
 				if(mosq->want_connect){
@@ -174,6 +183,7 @@ int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 				}else
 #endif
 				{
+					//** 处理需发送的消息 **
 					rc = mosquitto_loop_write(mosq, max_packets);
 					if(rc || mosq->sock == INVALID_SOCKET){
 						return rc;
@@ -187,6 +197,8 @@ int mosquitto_loop(struct mosquitto *mosq, int timeout, int max_packets)
 		}
 #endif
 	}
+
+	//keep-alive 检查
 	return mosquitto_loop_misc(mosq);
 }
 
@@ -342,8 +354,12 @@ int mosquitto_loop_read(struct mosquitto *mosq, int max_packets)
 		}else
 #endif
 		{
+			//从socket读取消息，并进行处理
 			rc = packet__read(mosq);
 		}
+
+		//socket读出错，关闭socket，断开连接
+		//非阻塞模式，没有报文要处理，返回rc
 		if(rc || errno == EAGAIN || errno == COMPAT_EWOULDBLOCK){
 			return mosquitto__loop_rc_handle(mosq, rc);
 		}

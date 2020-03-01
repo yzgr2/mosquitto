@@ -409,7 +409,7 @@ int packet__read(struct mosquitto *mosq)
 				errno = WSAGetLastError();
 #endif
 				if(errno == EAGAIN || errno == COMPAT_EWOULDBLOCK){
-					return MOSQ_ERR_SUCCESS;
+					return MOSQ_ERR_SUCCESS;	//非阻塞方式，没有报文
 				}else{
 					switch(errno){
 						case COMPAT_ECONNRESET:
@@ -485,6 +485,7 @@ int packet__read(struct mosquitto *mosq)
 	}
 	rc = handle__packet(db, mosq);
 #else
+	//读取到一个完整的消息，进行处理
 	rc = handle__packet(mosq);
 #endif
 

@@ -104,6 +104,8 @@ void my_disconnect_callback(struct mosquitto *mosq, void *obj, int rc, const mos
 	UNUSED(rc);
 	UNUSED(properties);
 
+	printf(" in my_disconnect_callback , rc=%d\n", rc);
+
 	if(rc == 0){
 		status = STATUS_DISCONNECTED;
 	}
@@ -128,6 +130,8 @@ void my_connect_callback(struct mosquitto *mosq, void *obj, int result, int flag
 	UNUSED(obj);
 	UNUSED(flags);
 	UNUSED(properties);
+
+	printf("in my_connect_callback, result=%d\n", result );
 
 	if(!result){
 		switch(cfg.pub_mode){
@@ -187,6 +191,8 @@ void my_publish_callback(struct mosquitto *mosq, void *obj, int mid, int reason_
 {
 	UNUSED(obj);
 	UNUSED(properties);
+
+	printf("in my_publish_callback, reason_code=%d\n", reason_code );
 
 	last_mid_sent = mid;
 	if(reason_code > 127){
@@ -317,7 +323,12 @@ int pub_other_loop(struct mosquitto *mosq)
 	}
 
 	do{
-		rc = mosquitto_loop(mosq, loop_delay, 1);
+		//mosquitto_loop循环接收并处理、回应报文,调用用户定义的回调
+		rc = mosquitto_loop(mosq, loop_delay, 1);	
+
+		//命令行--repeat参数，重复发送message N次	
+		//--repeat-delay指定两次重发之间的间隔，
+		//				check_repeat_time()检查间隔时间已过
 		if(ready_for_repeat && check_repeat_time()){
 			rc = MOSQ_ERR_SUCCESS;
 			switch(cfg.pub_mode){
@@ -468,10 +479,12 @@ int main(int argc, char *argv[])
 	struct mosquitto *mosq = NULL;
 	int rc;
 
+	//库初始化
 	mosquitto_lib_init();
 
 	if(pub_shared_init()) return 1;
 
+	//命令行解析
 	rc = client_config_load(&cfg, CLIENT_PUB, argc, argv);
 	if(rc){
 		if(rc == 2){
@@ -490,7 +503,9 @@ int main(int argc, char *argv[])
 	}
 #endif
 
+	//-l : read messages from stdin, sending a separate message for each line
 	if(cfg.pub_mode == MSGMODE_STDIN_FILE){
+		//从终端读取消息内容,存入cfg.message
 		if(load_stdin()){
 			err_printf(&cfg, "Error loading input from stdin.\n");
 			goto cleanup;
@@ -513,6 +528,7 @@ int main(int argc, char *argv[])
 		goto cleanup;
 	}
 
+	//申请，初始化mosq结构
 	mosq = mosquitto_new(cfg.id, cfg.clean_session, NULL);
 	if(!mosq){
 		switch(errno){
@@ -528,6 +544,8 @@ int main(int argc, char *argv[])
 	if(cfg.debug){
 		mosquitto_log_callback_set(mosq, my_log_callback);
 	}
+
+	//设置connect, disconnect,publish完成回调
 	mosquitto_connect_v5_callback_set(mosq, my_connect_callback);
 	mosquitto_disconnect_v5_callback_set(mosq, my_disconnect_callback);
 	mosquitto_publish_v5_callback_set(mosq, my_publish_callback);
@@ -536,6 +554,7 @@ int main(int argc, char *argv[])
 		goto cleanup;
 	}
 
+	//阻塞式连接服务器
 	rc = client_connect(mosq, &cfg);
 	if(rc){
 		goto cleanup;

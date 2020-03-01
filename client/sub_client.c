@@ -307,6 +307,7 @@ int main(int argc, char *argv[])
 		goto cleanup;
 	}
 
+	//
 	mosq = mosquitto_new(cfg.id, cfg.clean_session, &cfg);
 	if(!mosq){
 		switch(errno){

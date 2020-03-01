@@ -120,8 +120,10 @@ int mosquitto_connect_bind_v5(struct mosquitto *mosq, const char *host, int port
 	rc = mosquitto__connect_init(mosq, host, port, keepalive, bind_address);
 	if(rc) return rc;
 
+	//设置状态为 未连接 状态
 	mosquitto__set_state(mosq, mosq_cs_new);
 
+	//阻塞的方式连接
 	return mosquitto__reconnect(mosq, true, properties);
 }
 
