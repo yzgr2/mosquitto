@@ -94,3 +94,56 @@ int main(int argc, char *argv[])
 ```
 
 
+
+
+int mosquitto_publish_v5(struct mosquitto *mosq, int *mid, const char *topic, int payloadlen, const void *payload, int qos, ...)
+{
+
+	1. 生成mid，递增
+
+	2.1 检查qos类型：
+	    if qos == 0 then
+			send__publish(mosq, local_mid, topic, payloadlen, payload, qos, retain, false, outgoing_properties, NULL, 0);
+			send__publish实际调用send__real_publish，
+			int send__publish(.topic,payload..)
+			{
+				send__real_publish(..mid,topic,payload.)
+			}
+			send__real_publish（）
+			{
+				1. 申请 packet = mosquitto__packet结构，将负载拷贝到 packet 新申请的内存， 调用 **packet__queue(mosq, packet)**，
+					packet__queue 将packet放入mosq->out_packet队列（锁保护），
+									pthread_mutex_lock(&mosq->out_packet_mutex);
+									if(mosq->out_packet){
+										mosq->out_packet_last->next = packet;
+									}else{
+										mosq->out_packet = packet;  //头指针
+									}
+									mosq->out_packet_last = packet; //尾指针
+									pthread_mutex_unlock(&mosq->out_packet_mutex);
+					通知主线程，有packet需要发送。
+					如果当前处于主线程，调用 packet__write 检查mosq->out_packet队列，实际发送数据net__write(mosq, &(packet->payload[packet->pos]), packet->to_process)。
+			}
+
+	2.2 else qos为1或2
+			申请 message = mosquitto_message_all 结构，拷贝负载到message中, 将message放入msgs_out.inflight队列（锁保护）
+			pthread_mutex_lock(&mosq->msgs_out.mutex);
+			message__queue(mosq, message, mosq_md_out);
+			pthread_mutex_unlock(&mosq->msgs_out.mutex);
+
+			message__queue() 将message放入msgs_out.inflight队列
+							```c
+								DL_APPEND(mosq->msgs_out.inflight, message)，
+							```
+						调用message__release_to_inflight(), 循环遍历队列中的message，并调用send__publish发送message内容。
+							```c
+							DL_FOREACH_SAFE(mosq->msgs_out.inflight, cur, tmp)
+								rc = send__publish(mosq, cur->msg.mid, cur->msg.topic, cur->msg.payloadlen,
+												cur->msg.payload, cur->msg.qos, cur->msg.retain,
+												cur->dup, cur->properties, NULL, 0);
+							```
+
+}
+
+msgs_out.inflight 队列中的message在收到puback/rec_complete回应后删除
+
